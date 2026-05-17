@@ -15,8 +15,8 @@ import {
 } from "react-native";
 
 const API_URL = getApiUrl();
-const CHAT_HISTORY_KEY = "chatmate.history.v2";
-const CHAT_ROOMS_KEY = "chatmate.rooms.v2";
+const CHAT_HISTORY_KEY = "chatmate.history.v3";
+const CHAT_ROOMS_KEY = "chatmate.rooms.v3";
 
 const lightTheme = {
   background: "#F6F7FF",
