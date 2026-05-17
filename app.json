@@ -4,6 +4,9 @@
     "plugins": [
       "expo-router"
     ],
+    "experiments": {
+      "autolinkingModuleResolution": true
+    },
     "name": "apphw",
     "slug": "apphw"
   }
