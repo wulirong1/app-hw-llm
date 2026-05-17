@@ -15,8 +15,8 @@ import {
 } from "react-native";
 
 const API_URL = getApiUrl();
-const CHAT_HISTORY_KEY = "chatmate.history.v1";
-const CHAT_ROOMS_KEY = "chatmate.rooms.v1";
+const CHAT_HISTORY_KEY = "chatmate.history.v2";
+const CHAT_ROOMS_KEY = "chatmate.rooms.v2";
 
 const lightTheme = {
   background: "#F6F7FF",
@@ -319,7 +319,7 @@ function ChatHeader({ styles, onOpenMenu }) {
       <Pressable style={styles.menuButton} onPress={onOpenMenu}>
         <Text style={styles.menuButtonText}>☰</Text>
       </Pressable>
-      <Text style={styles.headerTitle}>ChatMate</Text>
+      <Text style={styles.headerTitle}>牙齒</Text>
     </View>
   );
 }
@@ -425,7 +425,7 @@ function TypingBubble({ styles }) {
         <Text style={styles.avatarText}>●●</Text>
       </View>
       <View style={styles.typingBubble}>
-        <Text style={styles.typingText}>ChatMate 正在回覆...</Text>
+        <Text style={styles.typingText}>牙齒正在回覆...</Text>
       </View>
     </View>
   );

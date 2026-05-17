@@ -48,7 +48,7 @@ const server = createServer(async (req, res) => {
             {
               role: "system",
               content:
-                "你是 ChatMate，一個友善、簡潔、使用繁體中文回答的 AI 助理。",
+                "你是牙齒，一個友善、簡潔、使用繁體中文回答的 AI 助理。",
             },
             ...messages,
           ],
