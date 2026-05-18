@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
+import * as NavigationBar from "expo-navigation-bar";
+import { StatusBar } from "expo-status-bar";
+import * as SystemUI from "expo-system-ui";
 import {
   ActivityIndicator,
+  Alert,
   Keyboard,
-  KeyboardAvoidingView,
+  NativeModules,
   Platform,
   Pressable,
   SafeAreaView,
@@ -12,6 +17,7 @@ import {
   Text,
   TextInput,
   View,
+  Image,
 } from "react-native";
 
 const API_URL = getApiUrl();
@@ -24,7 +30,7 @@ const lightTheme = {
   text: "#1E2433",
   muted: "#7C8292",
   border: "#E3E6F0",
-  primary: "#6457F4",
+  primary: "#589c74",
   primaryText: "#FFFFFF",
   assistantBubble: "#FFFFFF",
   input: "#FFFFFF",
@@ -41,11 +47,25 @@ export default function Page() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingChatId, setLoadingChatId] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [keyboardBottom, setKeyboardBottom] = useState(0);
 
   const theme = lightTheme;
   const styles = useMemo(() => createStyles(theme), [theme]);
   const activeChat = chats.find((chat) => chat.id === activeChatId) || chats[0];
   const messages = activeChat?.messages || [];
+
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(theme.background).catch(() => {});
+
+    if (Platform.OS !== "android") {
+      return;
+    }
+
+    Promise.all([
+      NavigationBar.setBackgroundColorAsync(theme.background),
+      NavigationBar.setButtonStyleAsync("dark"),
+    ]).catch(() => {});
+  }, [theme.background]);
 
   useEffect(() => {
     async function loadChatHistory() {
@@ -129,9 +149,25 @@ export default function Page() {
   }, [activeChatId, messages.length, isLoading]);
 
   useEffect(() => {
-    const eventName =
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const subscription = Keyboard.addListener(eventName, () => {
+    if (Platform.OS === "ios") {
+      const changeSubscription = Keyboard.addListener(
+        "keyboardWillChangeFrame",
+        (event) => {
+          setKeyboardBottom(Math.max(0, event.endCoordinates?.height || 0));
+          scrollToLatestMessage();
+        },
+      );
+      const hideSubscription = Keyboard.addListener("keyboardWillHide", () => {
+        setKeyboardBottom(0);
+      });
+
+      return () => {
+        changeSubscription.remove();
+        hideSubscription.remove();
+      };
+    }
+
+    const subscription = Keyboard.addListener("keyboardDidShow", () => {
       scrollToLatestMessage();
     });
 
@@ -189,7 +225,8 @@ export default function Page() {
         },
       ]);
     } catch (error) {
-      setErrorMessage(error.message || "聊天服務暫時無法使用");
+      const message = error.message || "聊天服務暫時無法使用";
+      setErrorMessage(`${message}（API: ${API_URL}）`);
     } finally {
       setIsLoading(false);
       setLoadingChatId("");
@@ -230,12 +267,63 @@ export default function Page() {
     setIsMenuOpen(false);
   }
 
+  function confirmDeleteChat(chatId) {
+    const chat = chats.find((currentChat) => currentChat.id === chatId);
+    const title = chat?.title || "這個聊天室";
+
+    Alert.alert("確認刪除聊天室？", `要刪除「${title}」嗎？`, [
+      {
+        text: "取消",
+        style: "cancel",
+      },
+      {
+        text: "刪除",
+        style: "destructive",
+        onPress: () => deleteChat(chatId),
+      },
+    ]);
+  }
+
+  function deleteChat(chatId) {
+    setChats((currentChats) => {
+      const remainingChats = currentChats.filter((chat) => chat.id !== chatId);
+
+      if (remainingChats.length === 0) {
+        const nextChat = createEmptyChat();
+        setActiveChatId(nextChat.id);
+        return [nextChat];
+      }
+
+      if (chatId === activeChatId) {
+        const [nextActiveChat] = [...remainingChats].sort(
+          (a, b) => b.updatedAt - a.updatedAt,
+        );
+        setActiveChatId(nextActiveChat.id);
+      }
+
+      return remainingChats;
+    });
+    setDraft("");
+    setErrorMessage("");
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.screen}
+      <StatusBar
+        backgroundColor={theme.background}
+        style="dark"
+        translucent={false}
+      />
+      <View
+        style={[
+          styles.screen,
+          Platform.OS === "ios" ? { paddingBottom: keyboardBottom } : null,
+        ]}
       >
+        <Pressable
+          style={styles.keyboardDismissArea}
+          onPress={Keyboard.dismiss}
+        >
         <ChatHeader
           styles={styles}
           onOpenMenu={() => setIsMenuOpen(true)}
@@ -248,6 +336,7 @@ export default function Page() {
             styles={styles}
             onClose={() => setIsMenuOpen(false)}
             onCreateChat={createChat}
+            onDeleteChat={confirmDeleteChat}
             onSelectChat={selectChat}
           />
         ) : null}
@@ -258,6 +347,7 @@ export default function Page() {
           <ScrollView
             ref={scrollViewRef}
             contentContainerStyle={styles.messageList}
+            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
             keyboardShouldPersistTaps="handled"
             onContentSizeChange={() => scrollToLatestMessage()}
             showsVerticalScrollIndicator={false}
@@ -308,7 +398,8 @@ export default function Page() {
             )}
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+        </Pressable>
+      </View>
     </SafeAreaView>
   );
 }
@@ -330,6 +421,7 @@ function ChatMenu({
   styles,
   onClose,
   onCreateChat,
+  onDeleteChat,
   onSelectChat,
 }) {
   const sortedChats = [...chats].sort((a, b) => b.updatedAt - a.updatedAt);
@@ -349,27 +441,39 @@ function ChatMenu({
           showsVerticalScrollIndicator={false}
         >
           {sortedChats.map((chat) => (
-            <Pressable
+            <View
               key={chat.id}
               style={[
                 styles.chatListItem,
                 chat.id === activeChatId ? styles.chatListItemActive : null,
               ]}
-              onPress={() => onSelectChat(chat.id)}
             >
-              <Text
-                numberOfLines={1}
-                style={[
-                  styles.chatListTitle,
-                  chat.id === activeChatId ? styles.chatListTitleActive : null,
-                ]}
+              <Pressable
+                style={styles.chatListContent}
+                onPress={() => onSelectChat(chat.id)}
               >
-                {chat.title}
-              </Text>
-              <Text numberOfLines={1} style={styles.chatListPreview}>
-                {getChatPreview(chat)}
-              </Text>
-            </Pressable>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.chatListTitle,
+                    chat.id === activeChatId ? styles.chatListTitleActive : null,
+                  ]}
+                >
+                  {chat.title}
+                </Text>
+                <Text numberOfLines={1} style={styles.chatListPreview}>
+                  {getChatPreview(chat)}
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityLabel={`刪除 ${chat.title}`}
+                hitSlop={8}
+                style={styles.deleteChatButton}
+                onPress={() => onDeleteChat(chat.id)}
+              >
+                <Text style={styles.deleteChatText}>×</Text>
+              </Pressable>
+            </View>
           ))}
         </ScrollView>
       </View>
@@ -380,16 +484,12 @@ function ChatMenu({
 function EmptyState({ styles }) {
   return (
     <View style={styles.emptyState}>
-      <View style={styles.logoCluster}>
-        <View style={styles.logoBubblePrimary}>
-          <Text style={styles.logoDots}>•••</Text>
-        </View>
-        <View style={styles.logoBubbleSecondary}>
-          <Text style={styles.logoDotsMuted}>•••</Text>
-        </View>
-      </View>
-      <Text style={styles.emptyTitle}>開始一段對話吧！</Text>
-      <Text style={styles.emptySubtitle}>與 AI 聊天，獲得答案、靈感或建議。</Text>
+      <Image
+        source={require("../assets/robot.jpeg")}
+        style={styles.emptyRobotImage}
+      />
+      <Text style={styles.emptyTitle}>歡迎跟牙齒聊天！</Text>
+      <Text style={styles.emptySubtitle}>跟牙齒聊天，暖你一整天</Text>
     </View>
   );
 }
@@ -401,7 +501,10 @@ function ChatBubble({ message, styles }) {
     <View style={[styles.messageRow, isUser ? styles.userRow : null]}>
       {!isUser ? (
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>●●</Text>
+          <Image
+            source={require("../assets/robot.jpeg")}
+            style={styles.avatarImage}
+          />
         </View>
       ) : null}
       <View style={styles.messageStack}>
@@ -422,7 +525,10 @@ function TypingBubble({ styles }) {
   return (
     <View style={styles.messageRow}>
       <View style={styles.avatar}>
-        <Text style={styles.avatarText}>●●</Text>
+        <Image
+            source={require("../assets/robot.jpeg")}
+            style={styles.avatarImage}
+          />
       </View>
       <View style={styles.typingBubble}>
         <Text style={styles.typingText}>牙齒正在回覆...</Text>
@@ -432,11 +538,60 @@ function TypingBubble({ styles }) {
 }
 
 function getApiUrl() {
+  const configuredUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
   if (Platform.OS === "web" && typeof window !== "undefined") {
     return `http://${window.location.hostname}:3001/api/chat`;
   }
 
-  return "http://localhost:3001/api/chat";
+  const host = getHostFromExpo() || getHostFromUrl(NativeModules.SourceCode?.scriptURL);
+
+  if (host && !isLocalhost(host)) {
+    return `http://${host}:3001/api/chat`;
+  }
+
+  return "http://127.0.0.1:3001/api/chat";
+}
+
+function getHostFromExpo() {
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    Constants.manifest2?.extra?.expoClient?.hostUri ||
+    Constants.manifest?.debuggerHost ||
+    Constants.manifest?.packagerOpts?.hostUri;
+
+  return getHostFromUrl(hostUri);
+}
+
+function getHostFromUrl(url) {
+  if (typeof url !== "string") {
+    return "";
+  }
+
+  const normalizedUrl = url.trim();
+
+  if (!normalizedUrl) {
+    return "";
+  }
+
+  try {
+    const parseableUrl = normalizedUrl.includes("://")
+      ? normalizedUrl
+      : `http://${normalizedUrl}`;
+
+    return new URL(parseableUrl).hostname;
+  } catch {
+    const match = normalizedUrl.match(/^(?:[a-z][a-z\d+.-]*:\/\/)?([^/:?#]+)/i);
+    return match?.[1] || "";
+  }
+}
+
+function isLocalhost(host) {
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
 function getCurrentTime() {
@@ -504,6 +659,9 @@ function createStyles(theme) {
     screen: {
       flex: 1,
       backgroundColor: theme.background,
+    },
+    keyboardDismissArea: {
+      flex: 1,
     },
     header: {
       height: 64,
@@ -592,16 +750,24 @@ function createStyles(theme) {
       paddingTop: 16,
     },
     chatListItem: {
+      alignItems: "center",
       backgroundColor: "#F7F8FF",
       borderColor: theme.border,
       borderRadius: 14,
       borderWidth: 1,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
+      flexDirection: "row",
+      gap: 10,
+      paddingLeft: 14,
+      paddingRight: 8,
+      paddingVertical: 10,
     },
     chatListItemActive: {
       backgroundColor: "#EFEEFF",
       borderColor: theme.primary,
+    },
+    chatListContent: {
+      flex: 1,
+      paddingVertical: 2,
     },
     chatListTitle: {
       color: theme.text,
@@ -617,52 +783,31 @@ function createStyles(theme) {
       fontSize: 12,
       lineHeight: 17,
     },
+    deleteChatButton: {
+      alignItems: "center",
+      backgroundColor: "#FFE8EA",
+      borderRadius: 16,
+      height: 32,
+      justifyContent: "center",
+      width: 32,
+    },
+    deleteChatText: {
+      color: "#B42333",
+      fontSize: 19,
+      fontWeight: "800",
+      lineHeight: 22,
+    },
     emptyState: {
       alignItems: "center",
       flex: 1,
       justifyContent: "center",
       paddingHorizontal: 36,
     },
-    logoCluster: {
-      height: 86,
-      marginBottom: 22,
-      width: 128,
-    },
-    logoBubblePrimary: {
-      alignItems: "center",
-      backgroundColor: theme.primary,
-      borderRadius: 26,
-      height: 58,
-      justifyContent: "center",
-      left: 18,
-      position: "absolute",
-      top: 4,
-      transform: [{ rotate: "-8deg" }],
-      width: 70,
-    },
-    logoBubbleSecondary: {
-      alignItems: "center",
-      backgroundColor: "#DCE1EE",
-      borderRadius: 23,
-      height: 50,
-      justifyContent: "center",
-      position: "absolute",
-      right: 12,
-      top: 28,
-      transform: [{ rotate: "8deg" }],
-      width: 62,
-    },
-    logoDots: {
-      color: "#FFFFFF",
-      fontSize: 24,
-      fontWeight: "800",
-      letterSpacing: 1,
-    },
-    logoDotsMuted: {
-      color: "#F7F8FF",
-      fontSize: 21,
-      fontWeight: "800",
-      letterSpacing: 1,
+    emptyRobotImage: {
+      borderRadius: 44,
+      height: 88,
+      marginBottom: 18,
+      width: 88,
     },
     emptyTitle: {
       color: theme.text,
@@ -701,6 +846,11 @@ function createStyles(theme) {
       justifyContent: "center",
       marginTop: 4,
       width: 30,
+    },
+    avatarImage: {
+      width: 40,
+      height: 40,
+      borderRadius: 999,
     },
     avatarText: {
       color: "#FFFFFF",

@@ -1,5 +1,6 @@
 const { createServer } = require("node:http");
 const { readFileSync } = require("node:fs");
+const { networkInterfaces } = require("node:os");
 const { resolve } = require("node:path");
 
 loadEnv();
@@ -76,8 +77,12 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(port, () => {
+server.listen(port, "0.0.0.0", () => {
   console.log(`Chat server running on http://localhost:${port}`);
+
+  for (const address of getLanAddresses()) {
+    console.log(`Available on your network at http://${address}:${port}`);
+  }
 });
 
 function loadEnv() {
@@ -158,4 +163,13 @@ function normalizeMessages(messages) {
       role: message.role,
       content: message.content.trim(),
     }));
+}
+
+function getLanAddresses() {
+  return Object.values(networkInterfaces())
+    .flat()
+    .filter((details) => {
+      return details && details.family === "IPv4" && !details.internal;
+    })
+    .map((details) => details.address);
 }

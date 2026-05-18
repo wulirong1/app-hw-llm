@@ -1,11 +1,21 @@
 {
   "expo": {
     "scheme": "acme",
+    "backgroundColor": "#F6F7FF",
+    "userInterfaceStyle": "light",
     "plugins": [
       "expo-router"
     ],
     "experiments": {
       "autolinkingModuleResolution": true
+    },
+    "androidStatusBar": {
+      "backgroundColor": "#F6F7FF",
+      "barStyle": "dark-content",
+      "translucent": false
+    },
+    "android": {
+      "softwareKeyboardLayoutMode": "resize"
     },
     "name": "apphw",
     "slug": "apphw"
